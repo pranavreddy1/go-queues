@@ -48,6 +48,8 @@ type Config struct {
 	// Maximum number of handlers to spawn
 	MaxHandlers int
 
+	//Maintains Current Free Count
+	HandlerCount int
 	// BusyTimeout in seconds
 	BusyTimeout int
 
@@ -132,7 +134,7 @@ func (s *Config) Poll() {
 	if s.svc == nil {
 		s.logger.Fatal("No service connection")
 	}
-	handlerCount := 0
+	s.HandlerCount = 0
 	wg := sync.WaitGroup{}
 	batch := 0
 
@@ -144,15 +146,15 @@ func (s *Config) Poll() {
 
 		maxMsgs := s.BatchSize
 		// Is running at capacity?
-		if s.MaxHandlers > 0 && handlerCount >= s.MaxHandlers {
-			logger.Info("Running at full capacity with ", handlerCount, "handlers")
+		if s.MaxHandlers > 0 && s.HandlerCount >= s.MaxHandlers {
+			logger.Info("Running at full capacity with ", s.HandlerCount, "handlers")
 
 			// Since all handlers are busy, let's wait for BusyTimeout seconds
 			logger.Info("Going to wait state for", s.BusyTimeout, "seconds")
 			<-time.After(time.Duration(s.BusyTimeout) * time.Second)
 			continue
 		} else {
-			maxMsgs = int64(s.MaxHandlers - handlerCount)
+			maxMsgs = int64(s.MaxHandlers - s.HandlerCount)
 			logger.Info("Can accept a maximum of ", maxMsgs, "messages")
 		}
 
@@ -178,10 +180,11 @@ func (s *Config) Poll() {
 
 		// Process messages
 		for _, msg := range result.Messages {
-			handlerCount++
+			s.HandlerCount++
 			wg.Add(1)
 			if s.PollHandler == nil {
 				logger.Error("No Poll handler registered. Register a handler for custom handling")
+				s.HandlerCount--
 			} else {
 				go s.PollHandler(&wg, msg)
 			}
@@ -229,6 +232,7 @@ func (s *Config) Delete(msg *sqs.Message) error {
 		QueueUrl:      &s.URL,
 		ReceiptHandle: msg.ReceiptHandle,
 	})
+	s.HandlerCount--
 
 	return err
 }
